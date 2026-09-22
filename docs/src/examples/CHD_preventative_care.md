@@ -53,16 +53,18 @@ const TD_states = ["treatment", "no treatment"]
 const R_states = [string(x) * "%" for x in [0:1:100;]]
 ```
 
- We then add the nodes. The chance and decision nodes are identified by their names. When declaring the nodes, they are also given information sets and states. Notice that nodes $R0$ and $H$ are root nodes, meaning that their information sets are empty. In Decision Programming, we add the chance and decision nodes in the follwoing way.
+ We then add the nodes. The chance and decision nodes are identified by their names. When declaring the nodes, they are also given information sets and states. In Decision Programming, we add the chance and decision nodes in the follwoing way. The node creation order must respect the information sets: all nodes in ($I_j$) must be added before node $j$. For example, $R_0$, $H$ and $T1$ must be created before $R_1$.
  ```julia
 add_node!(diagram, ChanceNode("R0", [], R_states))
-add_node!(diagram, ChanceNode("R1", ["R0", "H", "T1"], R_states))
-add_node!(diagram, ChanceNode("R2", ["R1", "H", "T2"], R_states))
 add_node!(diagram, ChanceNode("H", ["R0"], H_states))
-
 add_node!(diagram, DecisionNode("T1", ["R0"], T_states))
+add_node!(diagram, ChanceNode("R1", ["R0", "H", "T1"], R_states))
 add_node!(diagram, DecisionNode("T2", ["R1"], T_states))
+add_node!(diagram, ChanceNode("R2", ["R1", "H", "T2"], R_states))
 add_node!(diagram, DecisionNode("TD", ["R2"], TD_states))
+add_node!(diagram, ValueNode("TC", ["T1", "T2"]))
+add_node!(diagram, ValueNode("HB", ["H", "TD"]))
+
 ```
 
 The value nodes are added in a similar fashion. However, value nodes do not have states because they map their information states to utility values instead.
