@@ -513,6 +513,7 @@ mutable struct InfluenceDiagram
     I_j::OrderedDict{Name, Vector{Name}}
     States::OrderedDict{Name, Vector{Name}}
     S::OrderedDict{Name,State}
+    S_o::OrderedDict{Name, State}
  
     C::OrderedDict{Name, ChanceNode}
     D::OrderedDict{Name, DecisionNode}
@@ -924,14 +925,18 @@ function generate_arcs!(diagram::InfluenceDiagram)
     n_CD = length(C_and_D)
     V_ = filter(x -> isa(x[2], ValueNode), pairs(diagram.Nodes)) # Collects all ValueNodes
     n_V = length(V_)
+    
 
     validate_structure(diagram.Nodes, C_and_D, n_CD, V_, n_V)
 
     # Declare vectors for results
     I_j = OrderedDict{Name, Vector{Name}}()
+    I_d = OrderedDict{Name, Vector{Name}}()
     states = OrderedDict{Name, Vector{Name}}()
     S = OrderedDict{Name, State}()
+    S_o = OrderedDict{Name, State}()
     C = OrderedDict{Name, ChanceNode}()
+    C_I = OrderedDict{Name, ChanceNode}()
     D = OrderedDict{Name, DecisionNode}()
     V = OrderedDict{Name, ValueNode}()
 
@@ -953,16 +958,44 @@ function generate_arcs!(diagram::InfluenceDiagram)
     diagram.Names = get_keys(diagram.Nodes)
 
     for name in diagram.Names
-        I_j[name] = diagram.Nodes[name].I_j
+        I_j[name] = diagram.Nodes[name].I_j      
         if !isa(diagram.Nodes[name], ValueNode)
             states[name] = C_and_D[name].states
             S[name] = length(states[name])
         end
+        if isa(diagram.Nodes[name], DecisionNode)
+            I_d[name] = diagram.Nodes[name].I_j
+
+            for c in I_d[name]
+                if isa(diagram.Nodes[c], ChanceNode)
+                    C_I[c] = diagram.Nodes[c]
+
+                end
+
+            end
+        end
     end
 
+    O = merge(C_I, D)
+
+    #S_o: all observable states (all chance nodes that influence decisions)
+    for (name, node) in O
+        if isa(node, ChanceNode)
+            S_o[name] = length(node.states)
+        end
+    end
+
+
+  
+
     C = filter(x -> isa(x[2], ChanceNode), pairs(diagram.Nodes))
-    D = filter(x -> isa(x[2], DecisionNode), pairs(diagram.Nodes))
+    D = filter(x -> isa(x[2], DecisionNode), pairs(diagram.Nodes))  
+
     V = filter(x -> isa(x[2], ValueNode), pairs(diagram.Nodes))
+    
+    
+
+    
 
     diagram.I_j = I_j
     diagram.States = states
@@ -970,6 +1003,7 @@ function generate_arcs!(diagram::InfluenceDiagram)
     diagram.C = C
     diagram.D = D
     diagram.V = V
+    diagram.S_o = S_o
     # Declaring X and Y
     diagram.X = OrderedDict{Name, Probabilities}()
     diagram.Y = OrderedDict{Name, Utilities}()

@@ -65,6 +65,8 @@ function path_compatibility_variable(model::Model, base_name::String="")
     return @variable(model, base_name=base_name, lower_bound = 0, upper_bound = 1)
 end
 
+
+
 struct PathCompatibilityVariables{N} <: AbstractDict{Path{N}, VariableRef}
     data::Dict{Path{N}, VariableRef}
 end
@@ -78,6 +80,23 @@ Base.pairs(x_s::PathCompatibilityVariables) = pairs(x_s.data)
 Base.iterate(x_s::PathCompatibilityVariables) = iterate(x_s.data)
 Base.iterate(x_s::PathCompatibilityVariables, i) = iterate(x_s.data, i)
 
+function observable_segment_compatibility_variable(model::Model, base_name::String="")
+    # Create a observable segment compatibility variable
+    return @variable(model, base_name=base_name, lower_bound = 0, upper_bound = 1)
+end
+
+struct ObservableSegmentCompatibilityVariables{N} <: AbstractDict{Path{N}, VariableRef}
+    data::Dict{Path{N}, VariableRef}
+end
+
+# Base.length(x_s::PathCompatibilityVariables_RDP) = length(x_s.data)
+# Base.getindex(x_s::PathCompatibilityVariables_RDP, key) = getindex(x_s.data, key)
+# Base.get(x_s::PathCompatibilityVariables_RDP, key, default) = get(x_s.data, key, default)
+# Base.keys(x_s::PathCompatibilityVariables_RDP) = keys(x_s.data)
+# Base.values(x_s::PathCompatibilityVariables_RDP) = values(x_s.data)
+# Base.pairs(x_s::PathCompatibilityVariables_RDP) = pairs(x_s.data)
+# Base.iterate(x_s::PathCompatibilityVariables_RDP) = iterate(x_s.data)
+# Base.iterate(x_s::PathCompatibilityVariables_RDP, i) = iterate(x_s.data, i)
 
 function decision_strategy_constraint(model::Model, S::States, d::Node, I_d::Vector{Node}, D::Vector{Node}, z::Array{VariableRef}, x_s::PathCompatibilityVariables)
     # states of nodes in information structure (s_d | s_I(d))
@@ -157,6 +176,52 @@ function PathCompatibilityVariables(model::Model,
     )
 
     x_s = PathCompatibilityVariables{N}(variables_x_s)
+
+    # Add decision strategy constraints for each decision node
+    I_j_indices_result = I_j_indices(diagram, diagram.Nodes)
+    z_indices = indices(diagram.D)
+    z_z = [decision_node.z for decision_node in get_values(z)]
+
+    for (d, z_d) in zip(z_indices, z_z)
+        decision_strategy_constraint(model, States(get_values(diagram.S)), d, I_j_indices_result[d], z_indices, z_d, x_s)
+    end
+
+    if probability_cut
+        cons = sum(x * diagram.P(s) * probability_scale_factor for (s, x) in x_s)
+        @constraint(model, probability_cut, cons == 1.0 * probability_scale_factor)
+    end
+
+    return x_s
+end
+
+function ObservableSegmentCompatibilityVariables(model::Model,
+    diagram::InfluenceDiagram,
+    z::OrderedDict{Name, DecisionVariable};
+    names::Bool=false,
+    name::String="x",
+    forbidden_paths::Vector{ForbiddenPath}=ForbiddenPath[],
+    fixed::FixedPath=Dict{Node, State}(),
+    probability_cut::Bool=true,
+    probability_scale_factor::Float64=1.0)
+
+    if probability_scale_factor ≤ 0
+        throw(DomainError("The probability_scale_factor must be greater than 0."))
+    end
+
+    if !isempty(forbidden_paths)
+        @warn("Forbidden paths is still an experimental feature.")
+    end
+
+    # Create observable segment compatibility variable for each effective path.
+    N = length(diagram.S)
+
+    variables_y_s_o = Dict{Path{N}, VariableRef}(
+        s_o => observable_segment_compatibility_variable(model, (names ? "$(name)$(s)" : ""))
+        for s in paths(get_values(diagram.S), fixed)
+        if !iszero(diagram.P(s)) && !is_forbidden(s, forbidden_paths)
+    )
+
+    y_s_o = ObservableSegmentCompatibilityVariables{N}(variables_y_s_o)
 
     # Add decision strategy constraints for each decision node
     I_j_indices_result = I_j_indices(diagram, diagram.Nodes)
@@ -646,9 +711,13 @@ function generate_model(
     elseif model_type=="DP"
         variables = PathCompatibilityVariables(model, diagram, z, probability_cut = probability_cut, forbidden_paths = forbidden_paths, fixed=fixed)
         EV = expected_value(model, diagram, variables)
-        @objective(model, Max, EV)     
+        @objective(model, Max, EV)
+    elseif model_type=="RDP"
+        variables = PathCompatibilityVariables_RDP(model, diagram, z, probability_cut = probability_cut, forbidden_paths = forbidden_paths, fixed=fixed)
+        EV = expected_value(model, diagram, variables)
+        @objective(model, Max, EV)        
     else
-        error("Invalid model_type '$model_type'. It should be either 'RJT' or 'DP'.")
+        error("Invalid model_type '$model_type'. It should be either 'RJT', 'DP', or 'RDP'.")
     end
     return model, z, variables
 end
