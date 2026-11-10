@@ -513,8 +513,9 @@ mutable struct InfluenceDiagram
     I_j::OrderedDict{Name, Vector{Name}}
     States::OrderedDict{Name, Vector{Name}}
     S::OrderedDict{Name,State}
- 
+    O::OrderedDict{Name, AbstractNode} # Observation set of the influence diagram created as AbstractNode 
     C::OrderedDict{Name, ChanceNode}
+    C_I::OrderedDict{Name, ChanceNode}
     D::OrderedDict{Name, DecisionNode}
     V::OrderedDict{Name, ValueNode}
     X::OrderedDict{Name, Probabilities}
@@ -964,6 +965,8 @@ function generate_arcs!(diagram::InfluenceDiagram)
     D = filter(x -> isa(x[2], DecisionNode), pairs(diagram.Nodes))
     V = filter(x -> isa(x[2], ValueNode), pairs(diagram.Nodes))
 
+    
+
     diagram.I_j = I_j
     diagram.States = states
     diagram.S = S
@@ -1036,6 +1039,7 @@ function generate_diagram!(diagram::InfluenceDiagram;
         end
     end
 end
+
 
 
 """
@@ -1316,3 +1320,48 @@ struct DecisionStrategy
     I_d::Vector{Vector{Node}}
     Z_d::Vector{LocalDecisionStrategy}
 end
+
+
+function generate_observation_set!(diagram::InfluenceDiagram)
+    C_I = OrderedDict{Name, ChanceNode}()
+    
+    for (name, node) in diagram.D # Iterate over decision nodes       
+        for j in diagram.I_j[name] # Iterate over I_d
+            if isa(diagram.Nodes[j], ChanceNode)   # I want only chance nodes in the decision node's information set
+                C_I[j] = diagram.C[j]      
+            end
+        end
+    end
+
+    C_I = OrderedDict{Name, ChanceNode}( # Reorder C_I according to diagram.Names, following the approach used in generate_diagram!
+        name => C_I[name]
+        for name in diagram.Names
+        if haskey(C_I, name)
+        )
+
+    O = merge(
+        OrderedDict{Name, AbstractNode}(C_I),
+        OrderedDict{Name, AbstractNode}(diagram.D)
+    ) #Creating the observation set
+    O = OrderedDict{Name, AbstractNode}(
+        name => O[name]
+        for name in diagram.Names
+        if haskey(O, name)
+    )
+
+
+    
+    diagram.O = O
+    diagram.C_I = C_I
+
+    
+    return nothing
+end
+    
+    
+
+        
+
+
+
+

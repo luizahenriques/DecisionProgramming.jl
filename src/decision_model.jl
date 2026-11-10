@@ -65,6 +65,11 @@ function path_compatibility_variable(model::Model, base_name::String="")
     return @variable(model, base_name=base_name, lower_bound = 0, upper_bound = 1)
 end
 
+function observable_segment_compatibility_variable(model::Model, base_name::String="")
+    # Create a path compatiblity variable
+    return @variable(model, base_name=base_name, lower_bound = 0, upper_bound = 1)
+end
+
 
 
 struct PathCompatibilityVariables{N} <: AbstractDict{Path{N}, VariableRef}
@@ -80,23 +85,20 @@ Base.pairs(x_s::PathCompatibilityVariables) = pairs(x_s.data)
 Base.iterate(x_s::PathCompatibilityVariables) = iterate(x_s.data)
 Base.iterate(x_s::PathCompatibilityVariables, i) = iterate(x_s.data, i)
 
-function observable_segment_compatibility_variable(model::Model, base_name::String="")
-    # Create a observable segment compatibility variable
-    return @variable(model, base_name=base_name, lower_bound = 0, upper_bound = 1)
-end
-
 struct ObservableSegmentCompatibilityVariables{N} <: AbstractDict{Path{N}, VariableRef}
     data::Dict{Path{N}, VariableRef}
 end
 
-# Base.length(x_s::PathCompatibilityVariables_RDP) = length(x_s.data)
-# Base.getindex(x_s::PathCompatibilityVariables_RDP, key) = getindex(x_s.data, key)
-# Base.get(x_s::PathCompatibilityVariables_RDP, key, default) = get(x_s.data, key, default)
-# Base.keys(x_s::PathCompatibilityVariables_RDP) = keys(x_s.data)
-# Base.values(x_s::PathCompatibilityVariables_RDP) = values(x_s.data)
-# Base.pairs(x_s::PathCompatibilityVariables_RDP) = pairs(x_s.data)
-# Base.iterate(x_s::PathCompatibilityVariables_RDP) = iterate(x_s.data)
-# Base.iterate(x_s::PathCompatibilityVariables_RDP, i) = iterate(x_s.data, i)
+Base.length(y_s_o::ObservableSegmentCompatibilityVariables) = length(y_s_o.data)
+Base.getindex(y_s_o::ObservableSegmentCompatibilityVariables, key) = getindex(y_s_o.data, key)
+Base.get(y_s_o::ObservableSegmentCompatibilityVariables, key, default) = get(y_s_o.data, key, default)
+Base.keys(y_s_o::ObservableSegmentCompatibilityVariables) = keys(y_s_o.data)
+Base.values(y_s_o::ObservableSegmentCompatibilityVariables) = values(y_s_o.data)
+Base.pairs(y_s_o::ObservableSegmentCompatibilityVariables) = pairs(y_s_o.data)
+Base.iterate(y_s_o::ObservableSegmentCompatibilityVariables) = iterate(y_s_o.data)
+Base.iterate(y_s_o::ObservableSegmentCompatibilityVariables, i) = iterate(y_s_o.data, i)
+
+
 
 function decision_strategy_constraint(model::Model, S::States, d::Node, I_d::Vector{Node}, D::Vector{Node}, z::Array{VariableRef}, x_s::PathCompatibilityVariables)
     # states of nodes in information structure (s_d | s_I(d))
@@ -113,6 +115,55 @@ function decision_strategy_constraint(model::Model, S::States, d::Node, I_d::Vec
         # paths with (s_d | s_I(d)) information structure
         feasible_paths = filter(s -> s[[I_d; d]] == s_d_s_Id, existing_paths)
         @constraint(model, sum(get(x_s, s, 0) for s in feasible_paths) ≤ z[s_d_s_Id...] * min(length(feasible_paths), theoretical_ub))
+    end
+end
+function decision_strategy_constraint(model::Model, S::States, d::Node, I_d::Vector{Node}, D::Vector{Node}, O::Vector{Node}, C::Vector{Node}, z::Array{VariableRef}, y_s_o::ObservableSegmentCompatibilityVariables)
+    # states of nodes in information structure (s_d | s_I(d))
+    dims = S[[I_d; d]]
+
+ 
+    
+    indices_d_I_d = [I_d; d]    
+    positions_at_O = indexin(indices_d_I_d, O)
+
+    # Theoretical upper bound based on number of paths with information structure (s_d | s_I(d)) divided by number of possible decision strategies in other decision nodes
+    other_decisions = filter(j -> all(j != d_set for d_set in [I_d; d]), D)
+    other_chance_nodes = setdiff(C, O) 
+    theoretical_ub = prod(S)/prod(dims)/ (prod(S[other_decisions])*prod(S[other_chance_nodes]))
+
+    # paths that have a corresponding path compatibility variable
+    existing_observable_segments = keys(y_s_o)
+
+    for s_d_s_Id in paths(dims) # iterate through all information states and states of d
+        # paths with (s_d | s_I(d)) information structure
+        feasible_observable_segments = filter(
+            s_o -> Tuple(s_o[i] for i in positions_at_O) == s_d_s_Id,
+            existing_observable_segments
+        ) #Filter observable segments by s_d_s_Id
+        @constraint(model, sum(get(y_s_o, s_o, 0) for s_o in feasible_observable_segments) ≤ z[s_d_s_Id...] * min(length(feasible_observable_segments), theoretical_ub))
+    end
+end
+
+function observable_segment_selection_constraints(
+    model::Model,
+    diagram::InfluenceDiagram,
+    y_s_o::ObservableSegmentCompatibilityVariables
+
+
+)
+    O_indices = indices(diagram.O)
+    C_I_indices = indices(diagram.C_I)
+    positions_CI_at_O = indexin(C_I_indices, O_indices)
+
+    dims_CI = States(get_values(diagram.S))[C_I_indices] #States of the chance nodes in C_I
+
+    existing_observable_segments = keys(y_s_o)
+
+
+    for s_c_i in paths(dims_CI)
+        feasible_observable_segments = filter(
+                s_o -> Tuple(s_o[i] for i in positions_CI_at_O) == s_c_i, existing_observable_segments)
+        @constraint(model, sum(y_s_o[s_o] for s_o in feasible_observable_segments) <= 1)
     end
 end
 
@@ -162,6 +213,7 @@ function PathCompatibilityVariables(model::Model,
     if probability_scale_factor ≤ 0
         throw(DomainError("The probability_scale_factor must be greater than 0."))
     end
+    
 
     if !isempty(forbidden_paths)
         @warn("Forbidden paths is still an experimental feature.")
@@ -194,31 +246,42 @@ function PathCompatibilityVariables(model::Model,
     return x_s
 end
 
+
+
+
+
 function ObservableSegmentCompatibilityVariables(model::Model,
     diagram::InfluenceDiagram,
     z::OrderedDict{Name, DecisionVariable};
     names::Bool=false,
-    name::String="x",
+    name::String="y",
     forbidden_paths::Vector{ForbiddenPath}=ForbiddenPath[],
     fixed::FixedPath=Dict{Node, State}(),
     probability_cut::Bool=true,
     probability_scale_factor::Float64=1.0)
+
+
 
     if probability_scale_factor ≤ 0
         throw(DomainError("The probability_scale_factor must be greater than 0."))
     end
 
     if !isempty(forbidden_paths)
-        @warn("Forbidden paths is still an experimental feature.")
+        throw(DomainError("Forbidden paths is not supported in Reformulated Decision Programming yet."))
     end
 
-    # Create observable segment compatibility variable for each effective path.
-    N = length(diagram.S)
+    # Create observable segment compatibility variable
+    S_O = OrderedDict{Name, State}(
+    name => diagram.S[name] for name in keys(diagram.O)
+    )
+
+    N = length(S_O)
+
 
     variables_y_s_o = Dict{Path{N}, VariableRef}(
-        s_o => observable_segment_compatibility_variable(model, (names ? "$(name)$(s)" : ""))
-        for s in paths(get_values(diagram.S), fixed)
-        if !iszero(diagram.P(s)) && !is_forbidden(s, forbidden_paths)
+        s_o => observable_segment_compatibility_variable(model, (names ? "$(name)$(s_o)" : ""))
+        for s_o in paths(get_values(S_O))
+        #if !iszero(diagram.P(s_o)) && !is_forbidden(s_o, forbidden_paths) #Not implemented in Reformulated Decision Programming
     )
 
     y_s_o = ObservableSegmentCompatibilityVariables{N}(variables_y_s_o)
@@ -227,17 +290,32 @@ function ObservableSegmentCompatibilityVariables(model::Model,
     I_j_indices_result = I_j_indices(diagram, diagram.Nodes)
     z_indices = indices(diagram.D)
     z_z = [decision_node.z for decision_node in get_values(z)]
+    C_indices = indices(diagram.C)
+    O_indices = indices(diagram.O)
 
     for (d, z_d) in zip(z_indices, z_z)
-        decision_strategy_constraint(model, States(get_values(diagram.S)), d, I_j_indices_result[d], z_indices, z_d, x_s)
+        decision_strategy_constraint(model, States(get_values(diagram.S)), d, I_j_indices_result[d], z_indices, O_indices, C_indices, z_d, y_s_o)
     end
 
     if probability_cut
-        cons = sum(x * diagram.P(s) * probability_scale_factor for (s, x) in x_s)
-        @constraint(model, probability_cut, cons == 1.0 * probability_scale_factor)
-    end
 
-    return x_s
+        # Probability of each observable segment
+        P_s_o = Dict(s_o => 0.0 for s_o in keys(y_s_o))
+        
+        for s in paths(get_values(diagram.S))
+            s_o = Tuple(s[i] for i in O_indices)
+            P_s_o[s_o] += diagram.P(s)
+        end
+        
+        cons = sum(y * P_s_o[s_o] * probability_scale_factor for (s_o, y) in y_s_o)
+        @constraint(model, probability_cut, cons == 1.0 * probability_scale_factor)
+    end   
+
+
+
+    observable_segment_selection_constraints(model, diagram, y_s_o)
+
+    return y_s_o
 end
 
 """
@@ -292,7 +370,9 @@ function expected_value(model::Model,
     x_s::PathCompatibilityVariables)
 
     diff_sign_utilities = false
-    if minimum.(diagram.U.Y)[1]*maximum.(diagram.U.Y)[1] < 0.0
+    min_path_utility = sum(minimum.(diagram.U.Y)) + diagram.translation
+    max_path_utility = sum(maximum.(diagram.U.Y)) + diagram.translation
+    if min_path_utility * max_path_utility < 0.0
         diff_sign_utilities = true
     end
 
@@ -593,6 +673,54 @@ function expected_value(model::Model, diagram::InfluenceDiagram, μVars::RJTVari
     return EV
 end
 
+function expected_value(model::Model,
+    diagram::InfluenceDiagram,
+    y_s_o::ObservableSegmentCompatibilityVariables)
+ 
+
+    
+    diff_sign_utilities = false
+    min_path_utility = sum(minimum.(diagram.U.Y)) + diagram.translation
+    max_path_utility = sum(maximum.(diagram.U.Y)) + diagram.translation
+    if min_path_utility * max_path_utility < 0.0
+        diff_sign_utilities = true
+    end
+   
+
+    if isnothing(constraint_by_name(model, "probability_cut")) && diff_sign_utilities
+        throw(DomainError("The model contains both negative and positive utilities and no probability cut, which can lead to incorrect results. Probability cut constraint can be added using function PathCompatibilityVariables."))
+    end
+    
+    O_indices = indices(diagram.O)
+    complete_paths = collect(paths(get_values(diagram.S)))
+
+    # Complete paths containing each observable segment
+    E_s_o = Dict(
+        s_o => filter(
+            s -> Tuple(s[i] for i in O_indices) == s_o,
+            complete_paths
+        )
+        for s_o in keys(y_s_o)
+    )
+
+    # Expected utility of each observable segment
+    E_U_s_o = Dict(
+        s_o => sum(
+            diagram.P(s) * diagram.U(s, diagram.translation)
+            for s in E_s_o[s_o]
+        )
+        for s_o in keys(y_s_o)
+    )
+
+
+    @expression(
+        model,
+        sum(E_U_s_o[s_o] * y_s_o[s_o] for s_o in keys(y_s_o))
+    )
+    
+
+end
+
 
 """
     conditional_value_at_risk(model::Model,
@@ -713,7 +841,8 @@ function generate_model(
         EV = expected_value(model, diagram, variables)
         @objective(model, Max, EV)
     elseif model_type=="RDP"
-        variables = PathCompatibilityVariables_RDP(model, diagram, z, probability_cut = probability_cut, forbidden_paths = forbidden_paths, fixed=fixed)
+        generate_observation_set!(diagram)
+        variables = ObservableSegmentCompatibilityVariables(model, diagram, z,probability_cut = probability_cut, forbidden_paths = forbidden_paths, fixed=fixed)
         EV = expected_value(model, diagram, variables)
         @objective(model, Max, EV)        
     else
