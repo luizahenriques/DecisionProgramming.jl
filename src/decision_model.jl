@@ -695,13 +695,14 @@ function expected_value(model::Model,
     complete_paths = collect(paths(get_values(diagram.S)))
 
     # Complete paths containing each observable segment
-    E_s_o = Dict(
-        s_o => filter(
-            s -> Tuple(s[i] for i in O_indices) == s_o,
-            complete_paths
-        )
-        for s_o in keys(y_s_o)
-    )
+    for s in paths(get_values(diagram.S))
+        s_o = Tuple(s[i] for i in O_indices)
+
+        if haskey(E_U_s_o, s_o)
+            E_U_s_o[s_o] +=
+                diagram.P(s) * diagram.U(s, diagram.translation)
+        end
+    end
 
     # Expected utility of each observable segment
     E_U_s_o = Dict(
