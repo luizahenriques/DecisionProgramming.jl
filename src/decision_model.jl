@@ -134,13 +134,31 @@ function decision_strategy_constraint(model::Model, S::States, d::Node, I_d::Vec
     # paths that have a corresponding path compatibility variable
     existing_observable_segments = keys(y_s_o)
 
-    for s_d_s_Id in paths(dims) # iterate through all information states and states of d
-        # paths with (s_d | s_I(d)) information structure
-        feasible_observable_segments = filter(
-            s_o -> Tuple(s_o[i] for i in positions_at_O) == s_d_s_Id,
-            existing_observable_segments
-        ) #Filter observable segments by s_d_s_Id
-        @constraint(model, sum(get(y_s_o, s_o, 0) for s_o in feasible_observable_segments) ≤ z[s_d_s_Id...] * min(length(feasible_observable_segments), theoretical_ub))
+    N = length(O)
+
+    # Inicializa um grupo para cada combinação.
+    segments_by_state = Dict(
+        s_d_s_Id => Path{N}[]
+        for s_d_s_Id in paths(dims)
+    )
+
+    # Distribui os segmentos em uma única passagem.
+    for s_o in existing_observable_segments
+        s_d_s_Id = Tuple(s_o[i] for i in positions_at_O)
+        push!(segments_by_state[s_d_s_Id], s_o)
+    end
+
+    # Mantém a construção original das restrições.
+    for s_d_s_Id in paths(dims)
+        feasible_observable_segments = segments_by_state[s_d_s_Id]
+
+        @constraint(
+            model,
+            sum(get(y_s_o, s_o, 0)
+                for s_o in feasible_observable_segments) ≤
+            z[s_d_s_Id...] *
+            min(length(feasible_observable_segments), theoretical_ub)
+        )
     end
 end
 
