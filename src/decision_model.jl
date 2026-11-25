@@ -673,6 +673,29 @@ function expected_value(model::Model, diagram::InfluenceDiagram, μVars::RJTVari
     return EV
 end
 
+function accumulate_utilities!(
+    E_U_s_o::Dict{NTuple{N, State}, T},
+    complete_paths,
+    O_indices,
+    P,
+    U,
+    translation
+) where {N, T}
+
+    length(O_indices) == N ||
+        throw(DimensionMismatch("O_indices deve conter $N posições."))
+
+    for s in complete_paths
+        s_o = ntuple(i -> s[O_indices[i]], Val(N))
+
+        if haskey(E_U_s_o, s_o)
+            E_U_s_o[s_o] += P(s) * U(s, translation)
+        end
+    end
+
+    return nothing
+end
+
 function expected_value(model::Model,
     diagram::InfluenceDiagram,
     y_s_o::ObservableSegmentCompatibilityVariables)
@@ -698,14 +721,14 @@ function expected_value(model::Model,
         for s_o in keys(y_s_o)
     )
 
-    for s in paths(get_values(diagram.S))
-        s_o = Tuple(s[i] for i in O_indices)
-
-        if haskey(E_U_s_o, s_o)
-            E_U_s_o[s_o] +=
-                diagram.P(s) * diagram.U(s, diagram.translation)
-        end
-    end
+    accumulate_utilities!(
+        E_U_s_o,
+        paths(get_values(diagram.S)),
+        O_indices,
+        diagram.P,
+        diagram.U,
+        diagram.translation
+    )
 
     @expression(
         model,
